@@ -1,0 +1,27 @@
+DATA_BLOCK DI_DO
+STRUCT
+    input_byte: ARRAY[0..1] OF INT;
+    input_bit: ARRAY[0..1] OF INT;
+    
+    output_byte: ARRAY[0..1] OF INT;
+    output_bit: ARRAY[0..1] OF INT;
+
+END_STRUCT
+BEGIN
+
+input_byte[0] := 0;
+input_bit[0] := 0;
+
+input_byte[1] := 0;
+input_bit[1] := 1;
+
+output_byte[0] := 4;
+output_bit[0] := 0;
+
+output_byte[1] := 4;
+output_bit[1] := 1;
+
+
+
+END_DATA_BLOCK
+

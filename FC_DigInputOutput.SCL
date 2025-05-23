@@ -1,0 +1,25 @@
+FUNCTION FC_DigInputOutput : VOID
+
+VAR_TEMP 
+    outputByte : BYTE;
+    mask : BYTE;
+END_VAR
+
+BEGIN
+
+//Дискретные входа
+DB_DigInputOutput.H_pos := BYTE_TO_BOOL(SHR(IN := PIB[DI_DO.input_byte[0]], N := DI_DO.input_bit[0]));
+DB_DigInputOutput.L_pos := BYTE_TO_BOOL(SHR(IN := PIB[DI_DO.input_byte[0]], N := DI_DO.input_bit[1]));
+
+
+//Дискретные выхода
+outputByte := SHL(IN := BOOL_TO_BYTE(DB_DigInputOutput.hoist_motor_on), N := DI_DO.output_bit[0]);
+QB[DI_DO.output_byte[0]] := QB[DI_DO.output_byte[0]] OR outputByte;
+
+outputByte := SHL(IN := BOOL_TO_BYTE(DB_DigInputOutput.conveyor_motor_on), N := DI_DO.output_bit[1]);
+QB[DI_DO.output_byte[1]] := QB[DI_DO.output_byte[1]] OR outputByte;
+
+
+
+
+END_FUNCTION

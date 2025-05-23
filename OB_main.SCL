@@ -1,0 +1,35 @@
+ORGANIZATION_BLOCK OB35
+
+VAR_TEMP
+    Info : ARRAY[0..19] OF BYTE;
+    
+END_VAR
+
+BEGIN
+
+FC_DigInputOutput();
+
+FB_HM.DB_HM(
+H_pos := DB_DigInputOutput.H_pos,
+L_pos := DB_DigInputOutput.L_pos,
+conveyor_operation_time := DB_Logical.conveyor_operation_time,
+hoist_moving_time := DB_Logical.hoist_moving_time,
+start := DB_Logical.start,
+Unlock := DB_Logical.Unlock
+
+
+);
+
+DB_DigInputOutput.hoist_motor_on := DB_HM.hoist_motor_on;
+DB_DigInputOutput.conveyor_motor_on := DB_HM.conveyor_motor_on;
+
+DB_Logical.hoist_motor_status := DB_HM.hoist_motor_status;
+DB_Logical.conveyor_motor_status := DB_HM.conveyor_motor_status;
+DB_Logical.hoist_cycle_is_active := DB_HM.hoist_cycle_is_active;
+DB_Logical.hoist_cycle_completed := DB_HM.hoist_cycle_completed;
+DB_Logical.hoist_cycle_failed := DB_HM.hoist_cycle_failed;
+DB_Logical.error_code := DB_HM.error_code;
+
+
+END_ORGANIZATION_BLOCK
+    

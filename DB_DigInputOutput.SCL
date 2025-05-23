@@ -1,0 +1,12 @@
+DATA_BLOCK DB_DigInputOutput
+STRUCT
+    H_pos : BOOL;
+    L_pos : BOOL;
+    
+    hoist_motor_on : BOOL;
+    conveyor_motor_on : BOOL;
+END_STRUCT
+BEGIN
+
+H_pos := I 0.0;
+END_DATA_BLOCK

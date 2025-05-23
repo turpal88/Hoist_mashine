@@ -1,0 +1,23 @@
+DATA_BLOCK DB_Logical
+STRUCT
+    hoist_motor_status : BOOL;
+    conveyor_motor_status : BOOL;
+    hoist_cycle_is_active : BOOL;
+    hoist_cycle_completed : BOOL;
+    hoist_cycle_failed : BOOL;
+    error_code : BYTE;
+    
+    conveyor_operation_time : TIME := time#10000ms;
+    hoist_moving_time : TIME := time#10000ms;
+
+    start : BOOL := false;
+    Unlock : BOOL := false;
+
+END_STRUCT
+
+BEGIN
+start := false;
+Unlock := false;
+
+
+END_DATA_BLOCK

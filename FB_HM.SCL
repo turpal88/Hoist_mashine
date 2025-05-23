@@ -1,0 +1,179 @@
+FUNCTION_BLOCK FB_HM
+
+VAR_INPUT
+    H_pos : BOOL;
+    L_pos : BOOL;
+    conveyor_operation_time : TIME;
+    hoist_moving_time : TIME;
+
+    start : BOOL;
+    Unlock : BOOL;
+END_VAR
+
+VAR_OUTPUT
+    hoist_motor_status : BOOL;
+    conveyor_motor_status : BOOL;
+    hoist_cycle_is_active : BOOL;
+    hoist_cycle_completed : BOOL;
+    hoist_cycle_failed : BOOL;
+    error_code : BYTE;
+    
+    
+END_VAR
+
+VAR_IN_OUT
+    hoist_motor_on : BOOL;
+    conveyor_motor_on : BOOL;
+
+END_VAR
+
+VAR
+    step : INT := -1;
+    curTime : TIME;
+    conveyor_start_time : TIME := time#0ms;
+    hoist_start_time : TIME := time#0ms;
+    
+
+END_VAR
+
+CONST
+    HOIST_IS_MOVING := 1;
+    HOIST_IS_STOPPED := 0;
+
+    CONVEYOR_IS_MOVING := 1;
+    CONVEYOR_IS_STOPPED := 0;
+    
+    
+
+BEGIN
+
+
+curTime := TIME_TCK();
+  
+//Если есть команда на запуск и нет активных ошибок
+    IF(start AND INT_TO_BOOL(BYTE_TO_INT(error_code)) = false) THEN
+        hoist_cycle_completed := false;
+        
+
+        //Если привод в исходном состоянии (подъемный стол опущен)
+        IF(step = -1) THEN
+            step := 0;
+        //Если подъемный стол поднялся до верхнего концевика
+        ELSIF(step = 0 AND H_pos) THEN
+            step := 1;
+        //Если подъемный стол находится вверху, работает привод конвейера
+        ELSIF(step = 1 AND NOT L_pos AND NOT (conveyor_motor_status = INT_TO_BOOL(CONVEYOR_IS_MOVING))) THEN 
+            step := 2;
+        //Если подъемный стол опустился в нижнее положение
+        ELSIF(step = 2 AND L_pos) THEN 
+            step := -1;
+            hoist_cycle_completed := true;
+        END_IF; 
+
+    ELSIF(NOT(INT_TO_BOOL(BYTE_TO_INT(error_code))) = false) THEN 
+        IF NOT (step = -1) THEN
+            hoist_cycle_failed := true;
+            IF(L_pos) THEN
+                step := -1;
+            END_IF;
+            
+        END_IF;  
+    END_IF; 
+    
+
+
+        
+        
+
+
+
+//Если выполняется подъем (step = 0) или спуск подъемного стола (step = 2), либо при ошибке - засекаем текущее время
+IF(step = 0 OR step = 2 OR NOT(INT_TO_BOOL(BYTE_TO_INT(error_code))) = false) THEN
+    IF(hoist_start_time = time#0ms) THEN 
+        hoist_start_time := curTime;
+    END_IF;
+     
+END_IF;
+
+
+//Двигатель подъемного стола включить если время подъема/спуска меньше уставки либо при ошибке - возвращаем птм в исходное нижнее положение, в обоих случаях идет контроль времени работы привода
+hoist_motor_on := (NOT(INT_TO_BOOL(BYTE_TO_INT(error_code))) = false) OR (step = 0 OR step = 2) AND TIME_TO_DINT(curTime) - TIME_TO_DINT(hoist_start_time) < TIME_TO_DINT(hoist_moving_time);
+
+//Если выполняется смахивание (step = 1) засекаем текущее время
+IF(step = 1) THEN
+    IF(conveyor_start_time = time#0ms) THEN 
+        conveyor_start_time := curTime;
+    END_IF;
+     
+END_IF;
+
+//Привод конвейера включить если нет ошибки по разрешению на запуск, каких-либо ошибок по подъемному столу, выполняется смахивание и время смахивания меньше уставки
+conveyor_motor_on := INT_TO_BOOL(BYTE_TO_INT(error_code)) = false AND step = 1 AND ((TIME_TO_DINT(curTime) - TIME_TO_DINT(conveyor_start_time)) < TIME_TO_DINT(conveyor_operation_time));
+
+//Если время работы привода конвейра достигло уставки и выполняется спуск подъемного стола, либо произошла ошибка, обнулить время привода конвейера
+IF(((TIME_TO_DINT(curTime) - TIME_TO_DINT(conveyor_start_time)) >= TIME_TO_DINT(conveyor_operation_time)) AND (step = -1 OR step = 2)) THEN
+    conveyor_start_time := time#0ms;
+END_IF;
+
+//Если время работы привода подъемного стола достигло уставки и начался подъем (step = -1) или спуск (step = 2), обнулить время привода подъемного стола
+IF(((TIME_TO_DINT(curTime) - TIME_TO_DINT(hoist_start_time)) >= TIME_TO_DINT(hoist_moving_time)) AND (step = -1 OR step = 2)) THEN
+    hoist_start_time := time#0ms;
+END_IF;
+
+//Статус привода подъемного стола
+IF(hoist_motor_on) THEN 
+    hoist_motor_status := INT_TO_BOOL(HOIST_IS_MOVING);
+
+ELSE 
+   hoist_motor_status := INT_TO_BOOL(HOIST_IS_STOPPED);
+ 
+END_IF;
+
+//Статус привода конвейера
+IF(conveyor_motor_on) THEN 
+    conveyor_motor_status := INT_TO_BOOL(CONVEYOR_IS_MOVING);
+
+ELSE 
+   conveyor_motor_status := INT_TO_BOOL(CONVEYOR_IS_STOPPED);
+ 
+END_IF;
+
+
+hoist_cycle_is_active := step >= 0;
+
+//Обработка ошибок
+
+//Время работы привода подъемного стола больше уставки, нет концевика
+IF(hoist_cycle_is_active) THEN
+IF((TIME_TO_DINT(curTime) - TIME_TO_DINT(hoist_start_time)) >= TIME_TO_DINT(hoist_moving_time) AND NOT (H_pos OR L_pos)) THEN
+    error_code := error_code OR 16#1;
+END_IF;
+
+//Во время работы цикла ПТМ пропадает сигнал на запуск
+IF(hoist_cycle_is_active) THEN
+    IF(NOT start) THEN
+       error_code := error_code OR 16#2;
+    END_IF;
+END_IF;
+END_IF;
+
+//При деактивированном цикле работы ПТМ, сбрасываем ошибки 
+IF(Unlock AND step = -1) THEN
+    error_code := 16#0;
+    hoist_cycle_completed := false;
+    hoist_cycle_failed := false;
+    hoist_start_time := time#0ms;
+     conveyor_start_time := time#0ms;
+
+END_IF;
+
+
+
+END_FUNCTION_BLOCK
+
+
+DATA_BLOCK DB_HM
+FB_HM
+BEGIN
+
+END_DATA_BLOCK
