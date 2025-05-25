@@ -2,5 +2,6 @@ DB_DI_DO
 DB_DigInputOutput
 
 FC_DigInputOutput
+DB_Logical
 FB_HM
 OB_main

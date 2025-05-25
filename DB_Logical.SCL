@@ -9,15 +9,21 @@ STRUCT
     
     conveyor_operation_time : TIME := time#10000ms;
     hoist_moving_time : TIME := time#10000ms;
+    
+    Hoist_timer : TIMER;
+    Conveyor_timer : TIMER;
+    Hoist_timer_step_6 : TIMER;
+    Hoist_timer_step_7 : TIMER;
 
-    start : BOOL := false;
-    Unlock : BOOL := false;
 
+    
 END_STRUCT
 
 BEGIN
 start := false;
 Unlock := false;
+conveyor_operation_time := time#10000ms;
+hoist_moving_time := time#10000ms;
 
 
 END_DATA_BLOCK

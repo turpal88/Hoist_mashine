@@ -1,0 +1,39 @@
+FUNCTION_BLOCK UDT_timer
+
+VAR_IN_OUT
+    enable : BOOL;
+    Q : BOOL;
+    time_duration : TIME;
+    reset : BOOL;
+END_VAR
+
+VAR
+    curTime : TIME;
+    start_counting_time : TIME;
+    front_enable_timer : TP;
+    front_disable_timer : TP;
+    is_counting_proceeded : BOOL := false;
+END_VAR
+
+BEGIN
+
+curTime := TIME_TCK();
+front_enable_timer(IN := enable, PT := time#100ms);
+IF(front_enable_timer.Q) THEN
+    is_counting_proceeded := true;
+END_IF;
+
+Q := (TIME_TO_DINT(curTime) - TIME_TO_DINT(start_counting_time)) >= TIME_TO_DINT(time_duration);
+
+front_disable_timer(IN := reset, PT := time#100ms);
+IF(front_disable_timer.Q) THEN
+    is_counting_proceeded := false;
+    reset := false;
+END_IF;
+
+IF(NOT is_counting_proceeded) THEN
+    start_counting_time := curTime;
+END_IF;
+
+
+END_FUNCTION_BLOCK

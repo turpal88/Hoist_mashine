@@ -1,172 +1,342 @@
 FUNCTION_BLOCK FB_HM
 
 VAR_INPUT
+    //Верхний датчик (верхний концевик)
     H_pos : BOOL;
+    //Нижний датчик (нижний концевик)
     L_pos : BOOL;
+    //Уставка времени смахивания
     conveyor_operation_time : TIME;
+    //Уставка времени движения привода подъема от нижнего до верхнего концевика
     hoist_moving_time : TIME;
-
+    //Сигнал на запуск цикла подъема
     start : BOOL;
+    //Деблокировка - сброс ошибок и всех состояний 
     Unlock : BOOL;
+    
+    
 END_VAR
 
 VAR_OUTPUT
+    //Флаг включенного состояния привода подъема
     hoist_motor_status : BOOL;
+    //Флаг включенного состояния привода подъема конвейера (смахивания)
     conveyor_motor_status : BOOL;
+    //Флаг что цикл подъем-смахивание-опускание активен
     hoist_cycle_is_active : BOOL;
+    //Флаг что цикл подъем-смахивание-опускание завершен успешно
     hoist_cycle_completed : BOOL;
+    //Флаг что цикл подъем-смахивание-опускание завершен с ошибкой
     hoist_cycle_failed : BOOL;
+    //Код ошибки
+    //0000 0001 - Пропадание сигнала старт
+    //0000 0010 - Пропадание сигнала старт во время работы конвейера
+    //0000 0100 - Нет верхнего концевика (H_pos) и вышел таймер работы привода подъема
+    //0000 1000 - Нет нижнего концевика (L_pos) и вышел таймер работы привода подъема
     error_code : BYTE;
     
     
 END_VAR
 
 VAR_IN_OUT
+    //Дискретыне выхода
+    //На привод подъема
     hoist_motor_on : BOOL;
+    //На привод конвейера (смахивания)
     conveyor_motor_on : BOOL;
-
+    
 END_VAR
 
 VAR
+    //Шаг цикла подъем-смахивание-опускание
     step : INT := -1;
-    curTime : TIME;
-    conveyor_start_time : TIME := time#0ms;
-    hoist_start_time : TIME := time#0ms;
+    //Сигнал от алгоритма привод подъема включить (на шагах 0, 4)
+    alg_hoist_on : BOOL;
+    //Сигнал от алгоритма привод конвейера (смахивания) включить
+    alg_conveyor_on : BOOL;
+    //Сигнал от алгоритма привод подъема включить (на шаге 6)
+    alg_hoist_step_6_on : BOOL;
+    //Сигнал от алгоритма привод подъема включить (на шаге 7)
+    alg_hoist_step_7_on : BOOL;
     
+    //Генератор импульса на запуск цикла подъем-смахивание-опускание
+    TP_start : TP;
+    //Генератор импульса на деблокировку
+    TP_Unlock : TP;
+    //Команды на сброс таймеров
+    reset_Hoist_timer : BOOL;
+    reset_Conveyor_timer : BOOL;
+    reset_Hoist_timer_step_6 : BOOL;
+    reset_Hoist_timer_step_7 : BOOL;
+    
+    //Каждый таймер считает время работы соответствующего привода.
+    //Сброс таймера (reset) сбрасывает также фактический параметр reset в DB_HM (передача по ссылке)
+    Hoist_timer : UDT_timer;
+    Conveyor_timer : UDT_timer;
+    Hoist_timer_step_6 : UDT_timer;
+    Hoist_timer_step_7 : UDT_timer;
+    
+    //Уставки на время работы привода подъема в 2 раза больше чем hoist_moving_time при ошибках 
+    //в предположении что привод подъема должен в худшем случае пройти расстояние от нижнего концевика до верхнего и обратно так как устроен таким образом что сначала должен доехать до верха
+    //прежде чем двигаться вниз
+    hoist_moving_time_step_6 : TIME;
+    hoist_moving_time_step_7 : TIME;    
 
 END_VAR
 
-CONST
-    HOIST_IS_MOVING := 1;
-    HOIST_IS_STOPPED := 0;
-
-    CONVEYOR_IS_MOVING := 1;
-    CONVEYOR_IS_STOPPED := 0;
-    
-    
 
 BEGIN
 
-
-curTime := TIME_TCK();
-  
-//Если есть команда на запуск и нет активных ошибок
-    IF(start AND INT_TO_BOOL(BYTE_TO_INT(error_code)) = false) THEN
-        hoist_cycle_completed := false;
-        
-
-        //Если привод в исходном состоянии (подъемный стол опущен)
-        IF(step = -1) THEN
-            step := 0;
-        //Если подъемный стол поднялся до верхнего концевика
-        ELSIF(step = 0 AND H_pos) THEN
-            step := 1;
-        //Если подъемный стол находится вверху, работает привод конвейера
-        ELSIF(step = 1 AND NOT L_pos AND NOT (conveyor_motor_status = INT_TO_BOOL(CONVEYOR_IS_MOVING))) THEN 
-            step := 2;
-        //Если подъемный стол опустился в нижнее положение
-        ELSIF(step = 2 AND L_pos) THEN 
-            step := -1;
-            hoist_cycle_completed := true;
-        END_IF; 
-
-    ELSIF(NOT(INT_TO_BOOL(BYTE_TO_INT(error_code))) = false) THEN 
-        IF NOT (step = -1) THEN
-            hoist_cycle_failed := true;
-            IF(L_pos) THEN
-                step := -1;
-            END_IF;
-            
-        END_IF;  
-    END_IF; 
-    
-
-
-        
-        
-
-
-
-//Если выполняется подъем (step = 0) или спуск подъемного стола (step = 2), либо при ошибке - засекаем текущее время
-IF(step = 0 OR step = 2 OR NOT(INT_TO_BOOL(BYTE_TO_INT(error_code))) = false) THEN
-    IF(hoist_start_time = time#0ms) THEN 
-        hoist_start_time := curTime;
-    END_IF;
-     
-END_IF;
-
-
-//Двигатель подъемного стола включить если время подъема/спуска меньше уставки либо при ошибке - возвращаем птм в исходное нижнее положение, в обоих случаях идет контроль времени работы привода
-hoist_motor_on := (NOT(INT_TO_BOOL(BYTE_TO_INT(error_code))) = false) OR (step = 0 OR step = 2) AND TIME_TO_DINT(curTime) - TIME_TO_DINT(hoist_start_time) < TIME_TO_DINT(hoist_moving_time);
-
-//Если выполняется смахивание (step = 1) засекаем текущее время
-IF(step = 1) THEN
-    IF(conveyor_start_time = time#0ms) THEN 
-        conveyor_start_time := curTime;
-    END_IF;
-     
-END_IF;
-
-//Привод конвейера включить если нет ошибки по разрешению на запуск, каких-либо ошибок по подъемному столу, выполняется смахивание и время смахивания меньше уставки
-conveyor_motor_on := INT_TO_BOOL(BYTE_TO_INT(error_code)) = false AND step = 1 AND ((TIME_TO_DINT(curTime) - TIME_TO_DINT(conveyor_start_time)) < TIME_TO_DINT(conveyor_operation_time));
-
-//Если время работы привода конвейра достигло уставки и выполняется спуск подъемного стола, либо произошла ошибка, обнулить время привода конвейера
-IF(((TIME_TO_DINT(curTime) - TIME_TO_DINT(conveyor_start_time)) >= TIME_TO_DINT(conveyor_operation_time)) AND (step = -1 OR step = 2)) THEN
-    conveyor_start_time := time#0ms;
-END_IF;
-
-//Если время работы привода подъемного стола достигло уставки и начался подъем (step = -1) или спуск (step = 2), обнулить время привода подъемного стола
-IF(((TIME_TO_DINT(curTime) - TIME_TO_DINT(hoist_start_time)) >= TIME_TO_DINT(hoist_moving_time)) AND (step = -1 OR step = 2)) THEN
-    hoist_start_time := time#0ms;
-END_IF;
-
-//Статус привода подъемного стола
-IF(hoist_motor_on) THEN 
-    hoist_motor_status := INT_TO_BOOL(HOIST_IS_MOVING);
-
-ELSE 
-   hoist_motor_status := INT_TO_BOOL(HOIST_IS_STOPPED);
- 
-END_IF;
-
-//Статус привода конвейера
-IF(conveyor_motor_on) THEN 
-    conveyor_motor_status := INT_TO_BOOL(CONVEYOR_IS_MOVING);
-
-ELSE 
-   conveyor_motor_status := INT_TO_BOOL(CONVEYOR_IS_STOPPED);
- 
-END_IF;
-
-
-hoist_cycle_is_active := step >= 0;
-
-//Обработка ошибок
-
-//Время работы привода подъемного стола больше уставки, нет концевика
-IF(hoist_cycle_is_active) THEN
-IF((TIME_TO_DINT(curTime) - TIME_TO_DINT(hoist_start_time)) >= TIME_TO_DINT(hoist_moving_time) AND NOT (H_pos OR L_pos)) THEN
-    error_code := error_code OR 16#1;
-END_IF;
-
-//Во время работы цикла ПТМ пропадает сигнал на запуск
-IF(hoist_cycle_is_active) THEN
-    IF(NOT start) THEN
-       error_code := error_code OR 16#2;
-    END_IF;
-END_IF;
-END_IF;
-
-//При деактивированном цикле работы ПТМ, сбрасываем ошибки 
-IF(Unlock AND step = -1) THEN
-    error_code := 16#0;
+//Сигнал на запуск импульсом, следующий запуск после переключения входа start с 1 на 0 и обратно
+TP_start(IN := start, PT := time#100ms);
+IF(TP_start.Q AND step = -1 AND error_code = 16#0) THEN 
+    step := 0;
+    //Снимаем флаги завершения цикла с ошибкой и без нее
     hoist_cycle_completed := false;
     hoist_cycle_failed := false;
-    hoist_start_time := time#0ms;
-     conveyor_start_time := time#0ms;
 
 END_IF;
 
+
+CASE step OF 
+    
+    0: //Подъем
+    
+    //Если пропал сигнал на запуск - переходим к шагу 6
+    IF(NOT start) THEN
+        step := 6;
+    ELSE
+        //Иначе - запускаем привод подъема
+        alg_hoist_on := true;
+        //Если доехали до верхнего концевика - сброс таймера привода, на шаг 1
+        IF(H_pos AND NOT Hoist_timer.Q) THEN
+            step := 1;
+            reset_Hoist_timer := true;
+        //Если вышел таймер привода и нет верхнего концевика - на шаг 7 и сброс таймера работы привода
+        ELSIF(Hoist_timer.Q AND NOT H_pos) THEN
+            step := 7;
+            reset_Hoist_timer := true;
+        END_IF;
+         
+
+    END_IF;
+    
+    1: //Смахивание. Стоп привода подъема
+    //Если пропал сигнал на запуск - переходим к шагу 6
+    IF(NOT start) THEN
+        step := 6;
+    //Иначе - стоп привод подъема, переход на шаг 2
+    ELSE
+       alg_hoist_on := false;
+       step := 2;
+    END_IF;
+    
+    2://Смахивание. Запуск привода конвейера (смахивания)
+    //Если пропал сигнал на запуск - переходим к шагу 6
+    IF(NOT start) THEN
+        step := 6;
+    //Иначе - запуск привода смахивания
+    ELSE
+        alg_conveyor_on := true;
+        //Если вышло время работы привода - сброс таймера работы привода, на шаг 3
+        IF(Conveyor_timer.Q) THEN
+            step := 3;
+            reset_Conveyor_timer := true; 
+        END_IF;
+        
+    END_IF;
+    
+    3://Смахивание. Стоп привод смахивания
+    //Если пропал сигнал на запуск - переходим к шагу 6
+    IF(NOT start) THEN
+        step := 6;
+    //Иначе - стоп привода смахивания, на шаг 4
+    ELSE
+       alg_conveyor_on := false;
+       step := 4;
+    END_IF;
+    
+    4://Опускание
+     //Если пропал сигнал на запуск - переходим к шагу 6
+    IF(NOT start) THEN
+        step := 6;
+    //Иначе - запуск привода подъема
+    ELSE
+        alg_hoist_on := true;
+        IF(L_pos OR Hoist_timer.Q) THEN
+            //Если доехали до нижнего концевика и время не вышло- на шаг 5
+            IF(L_pos AND NOT Hoist_timer.Q) THEN
+                step := 5;
+            //Если время работы привода подъема вышло и нет нижнего концевика - на шаг 8
+            ELSIF(Hoist_timer.Q AND NOT L_pos) THEN
+                step := 8; 
+            END_IF;
+        END_IF;
+    END_IF;
+    
+    5://Опускание. Стоп привода подъема
+    //Если пропал сигнал на запуск - переходим к шагу 6
+    IF(NOT start) THEN
+        step := 6;
+    //Иначе - стоп приовда подъема, на шаг 9
+    ELSE
+        alg_hoist_on := false;
+        reset_Hoist_timer := true;
+
+        step := 9;
+    END_IF;
+    
+    6://Пропадание сигнала старт (привод конвейера остановлен)
+    //Фиксируем код ошибки
+    error_code := error_code OR 16#1;
+    IF(alg_conveyor_on) THEN
+        //Пропадание сигнала старт во время работы конвейера
+        error_code := error_code OR 16#2;
+        //Дождаться пока конвейер заврешит смахивание чтобы избежать падения груза при движении привода подъема вниз
+        IF(Conveyor_timer.Q) THEN
+            alg_conveyor_on := false;
+            reset_Conveyor_timer := true;
+        END_IF;
+        
+    ELSE 
+    
+    //Алгоритмический сигнал на запуск привода подъема снять, таймер работы привода сбросить
+    IF(alg_hoist_on) THEN
+        alg_hoist_on := false;
+        reset_Hoist_timer := true;
+
+    END_IF;
+    
+    //Пока нет нижнего концевика, взвод алг сигнала на запуск привода подъема (теперь работает от него)
+    IF(NOT L_pos) THEN
+        alg_hoist_step_6_on := true;
+    //Когда сработает концевик - на шаг 10
+    ELSIF(L_pos AND NOT Hoist_timer_step_6.Q) THEN 
+        alg_hoist_step_6_on := false;
+        reset_Hoist_timer_step_6 := true;
+        step := 10;
+    END_IF;
+    
+    //Если таймер работы привода вышел и нет нижнего концевика - на шаг 8
+    IF(Hoist_timer_step_6.Q AND NOT L_pos) THEN
+        step := 8;
+        //Сбрасываем таймер работы привода подъема
+        reset_Hoist_timer_step_6 := true;
+
+    END_IF;
+    END_IF;
+    
+     7://Нет верхнего концевика (H_pos) и вышел таймер работы привода подъема
+    //Фиксируем код ошибки 
+    error_code := error_code OR 16#4;
+    //Если еще и пропал сигнал на запуск, фиксируем это в коде ошибки
+    IF(NOT start) THEN
+        IF(NOT (16#1 AND error_code = 16#1)) THEN
+            error_code := error_code OR 16#1;
+        END_IF;
+        
+    END_IF;
+    
+    //Алг сигнал запуска привода подъема отключить
+    IF(alg_hoist_on) THEN
+        alg_hoist_on := false;
+        reset_Hoist_timer := true;
+
+    END_IF;
+    
+    IF(NOT L_pos) THEN
+        alg_hoist_step_7_on := true; 
+    ELSIF(L_pos AND NOT Hoist_timer_step_7.Q) THEN 
+        step := 10;
+        alg_hoist_step_7_on := false;
+        reset_Hoist_timer_step_7 := true;
+
+    END_IF;
+    
+    //Если вышел таймер работы привода и нет нижнего концевика - на шаг 8
+    IF(Hoist_timer_step_7.Q AND NOT L_pos) THEN
+       step := 8;
+       reset_Hoist_timer_step_7 := true;
+
+     END_IF;
+        
+    
+    
+    8: //Нет нижнего концевика (L_pos) и вышел таймер работы привода подъема
+    //Фиксируем код ошибки 
+    error_code := error_code OR 16#8;
+    //Если еще и пропал сигнал на запуск, фиксируем это в коде ошибки
+    IF(NOT start) THEN
+        IF(NOT (16#1 AND error_code = 16#1)) THEN
+            error_code := error_code OR 16#1;
+        END_IF;
+        
+    END_IF;
+    
+    //Сбрасываем все алг сигналы на запуск привода подъема, на шаг 10
+    alg_hoist_on := false;
+    alg_hoist_step_6_on := false;
+    alg_hoist_step_7_on := false;
+    step := 10;
+    
+    9: //Фиксация завершения цикла работы подъема-смахивания-опускания успешно
+    step := -1;
+    hoist_cycle_completed := true;
+    
+    10: //Фиксация завершения цикла работы подъема-запуска-опускания с ошибкой
+    step := -1;
+    hoist_cycle_failed := true;
+    
+END_CASE;
+
+hoist_moving_time_step_6 := DINT_TO_TIME(INT_TO_DINT(2) * TIME_TO_DINT(hoist_moving_time));
+hoist_moving_time_step_7 := hoist_moving_time_step_6;
+
+Hoist_timer(
+enable := alg_hoist_on,
+time_duration := hoist_moving_time,
+reset := reset_Hoist_timer
+);
+
+Conveyor_timer(
+enable := alg_conveyor_on,
+time_duration := conveyor_operation_time,
+reset := reset_Conveyor_timer
+);
+
+Hoist_timer_step_6(
+enable := alg_hoist_step_6_on,
+time_duration := hoist_moving_time_step_6,
+reset := reset_Hoist_timer_step_6
+);
+
+Hoist_timer_step_7(
+enable := alg_hoist_step_7_on,
+time_duration := hoist_moving_time_step_7,
+reset := reset_Hoist_timer_step_7
+);
+
+
+hoist_motor_on := alg_hoist_on OR alg_hoist_step_6_on OR alg_hoist_step_7_on;
+conveyor_motor_on := alg_conveyor_on;
+
+hoist_cycle_is_active := step = 0 OR hoist_cycle_is_active AND NOT(step = -1);
+
+hoist_motor_status := hoist_motor_on;
+
+conveyor_motor_status := conveyor_motor_on;
+
+TP_Unlock(IN := Unlock, PT := time#100ms);
+IF(TP_Unlock.Q) THEN
+    error_code := 16#0;
+    alg_hoist_on := false;
+    alg_hoist_step_6_on := false;
+    alg_hoist_step_7_on := false;
+    hoist_cycle_completed := false;
+    hoist_cycle_failed := false;
+
+END_IF;
+ 
 
 
 END_FUNCTION_BLOCK
